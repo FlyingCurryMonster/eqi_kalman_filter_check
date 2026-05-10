@@ -97,7 +97,7 @@ def riccati_ar1(a, tau_eps, tau_eta):
     return 0.5 * ((a ** 2 - 1) * Sn + Se + np.sqrt(disc))
 
 
-def run_example(name, A, b_const, B, tau_eps, tau_eta, sig_init, T=5000, seed=0,
+def run_example(name, A, b_const, B, tau_eps, tau_eta, sig_init, T=1000, seed=0,
                 analytic_sig=None):
     x_true, y = simulate(A, b_const, B, tau_eps, tau_eta, T, x0=0.0, seed=seed)
 
@@ -161,39 +161,32 @@ def run_example(name, A, b_const, B, tau_eps, tau_eta, sig_init, T=5000, seed=0,
 
 
 def plot_example(name, x_true, y, res_c, res_a, fname):
-    win = slice(0, 200)
-    fig, axes = plt.subplots(4, 1, figsize=(10, 11))
+    fig, axes = plt.subplots(3, 1, figsize=(10, 9))
 
-    axes[0].plot(x_true[win], "k-", lw=1.2, label="true x_t")
-    axes[0].plot(res_c["x_post"][win], "b-", lw=1.0, label="(2.29) with t|t-1")
-    axes[0].plot(res_a["x_post"][win], "r--", lw=1.0, label="(2.29) as printed with t|t")
-    axes[0].plot(y[win], "k.", ms=2, alpha=0.3, label="y_t")
+    axes[0].plot(x_true, "k-", lw=0.6, label="true x_t")
+    axes[0].plot(res_c["x_post"], "b-", lw=0.5, label="(2.29) with t|t-1")
+    axes[0].plot(res_a["x_post"], "r--", lw=0.5, label="(2.29) as printed with t|t")
+    axes[0].plot(y, "k.", ms=1, alpha=0.2, label="y_t")
     axes[0].legend(loc="best", fontsize=8)
-    axes[0].set_title(f"{name}: filtered state (first 200 steps)")
-
-    axes[1].plot(np.sqrt(res_c["S_post"]), "b-", label="(2.29) with t|t-1")
-    axes[1].plot(np.sqrt(res_a["S_post"]), "r--", label="(2.29) as printed with t|t")
-    axes[1].set_ylabel("posterior std dev  √Σ̂_{t|t}")
-    axes[1].legend(fontsize=8)
+    axes[0].set_title(f"{name}: filtered state")
 
     innov_c = y - res_c["x_pred"]
     innov_a = y - res_a["x_pred"]
-    axes[2].plot(innov_c[win], "b-", lw=0.8, label="(2.29) with t|t-1")
-    axes[2].plot(innov_a[win], "r--", lw=0.8, label="(2.29) as printed with t|t")
-    axes[2].axhline(0, color="k", lw=0.5)
-    # axes[2].set_ylabel("innovation  y_t − B x̂_{t|t-1}")
-    axes[2].set_ylabel(r"innovation  $y_{t} - \hat{x}_{t+1|t}$")
-    axes[2].legend(fontsize=8)
+    axes[1].plot(innov_c, "b-", lw=0.4, label="(2.29) with t|t-1")
+    axes[1].plot(innov_a, "r--", lw=0.4, label="(2.29) as printed with t|t")
+    axes[1].axhline(0, color="k", lw=0.5)
+    axes[1].set_ylabel(r"innovation  $y_{t} - \hat{x}_{t+1|t}$")
+    axes[1].legend(fontsize=8)
 
     tau_eta2 = res_c["_tau_eta2"]
     Sc = res_c["S_pred"] + tau_eta2
     Sa = res_a["S_pred"] + tau_eta2
     ll_c = -0.5 * (np.log(2 * np.pi * Sc) + innov_c ** 2 / Sc)
     ll_a = -0.5 * (np.log(2 * np.pi * Sa) + innov_a ** 2 / Sa)
-    axes[3].plot(np.cumsum(ll_c - ll_a), "g-")
-    axes[3].axhline(0, color="k", lw=0.5)
-    axes[3].set_ylabel("cum loglik:  t|t-1  −  as printed t|t")
-    axes[3].set_xlabel("t")
+    axes[2].plot(np.cumsum(ll_c - ll_a), "g-")
+    axes[2].axhline(0, color="k", lw=0.5)
+    axes[2].set_ylabel("cum loglik:  t|t-1  −  as printed t|t")
+    axes[2].set_xlabel("t")
 
     plt.tight_layout()
     plt.savefig(fname, dpi=120)
@@ -203,14 +196,13 @@ def plot_example(name, x_true, y, res_c, res_a, fname):
 
 def main():
     # ---- Example 2.1: Muth / random walk + noise ----
-    # κ = τ_η/τ_ε = 0.5  →  K ≈ 0.83  (intermediate gain to make the (2.29) typo bite hardest)
-    tau_eps, tau_eta = 1.0, 0.5
+    tau_eps, tau_eta = 1, 5
     sig_ss_muth = riccati_muth(tau_eps, tau_eta)
     x_true, y, res_c, res_a = run_example(
         "Example 2.1 (Muth: random walk + noise)",
         A=1.0, b_const=0.0, B=1.0,
         tau_eps=tau_eps, tau_eta=tau_eta,
-        sig_init=sig_ss_muth, T=5000, seed=1,
+        sig_init=sig_ss_muth, T=1000, seed=1,
         analytic_sig=sig_ss_muth,
     )
     res_c["_tau_eta2"] = tau_eta ** 2
@@ -223,14 +215,13 @@ def main():
     mu = 0.0
     a = 1 - lam
     b_const = lam * mu
-    # κ = 0.5 here too; previously κ=20 made K≈0.012 and the two filters indistinguishable
-    tau_eps, tau_eta = 1.0, 0.5
+    tau_eps, tau_eta = 1, 5
     sig_ss_ar1 = riccati_ar1(a, tau_eps, tau_eta)
     x_true, y, res_c, res_a = run_example(
         "Example 2.2 (AR(1) + noise)",
         A=a, b_const=b_const, B=1.0,
         tau_eps=tau_eps, tau_eta=tau_eta,
-        sig_init=sig_ss_ar1, T=5000, seed=2,
+        sig_init=sig_ss_ar1, T=1000, seed=2,
         analytic_sig=sig_ss_ar1,
     )
     res_c["_tau_eta2"] = tau_eta ** 2
