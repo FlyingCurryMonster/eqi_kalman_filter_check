@@ -157,18 +157,6 @@ def run_example(name, A, b_const, B, tau_eps, tau_eta, sig_init, T=5000, seed=0,
     print(f"  paired Δ loglik (t|t-1 − as printed t|t) = {sum_ll:+.2f}  HAC SE (L={L_ll}) = {se_ll:.2f}  →  {sum_ll/se_ll:+.1f}σ")
     print(f"  paired Σ(SE_asprinted − SE_t|t-1)        = {sum_se:+.2f}  HAC SE (L={L_se}) = {se_se:.2f}  →  {sum_se/se_se:+.1f}σ")
 
-    # Innovation diagnostics: a correctly specified filter has innovations with
-    # variance ≈ B Σ̂_{t|t-1} Bᵀ + Σ_η  (= S_innov from the predictive density).
-    # A misspecified prediction step inflates the empirical innovation variance.
-    inn_c = y - res_c["x_pred"]
-    inn_a = y - res_a["x_pred"]
-    expected_S_innov = res_c["S_pred"][-1] * B * B + tau_eta2  # same for both filters
-    print(f"  innovation variance (model expects {expected_S_innov:.4f}):")
-    print(f"    (2.29) with t|t-1          empirical = {inn_c.var():.4f}")
-    print(f"    (2.29) as printed with t|t empirical = {inn_a.var():.4f}")
-    print(f"  corr(innov_c, innov_a) = {np.corrcoef(inn_c, inn_a)[0,1]:.5f}   "
-          f"std(innov_a − innov_c) = {(inn_a - inn_c).std():.4f}")
-
     return x_true, y, res_c, res_a
 
 
@@ -215,7 +203,8 @@ def plot_example(name, x_true, y, res_c, res_a, fname):
 
 def main():
     # ---- Example 2.1: Muth / random walk + noise ----
-    tau_eps, tau_eta = 1, 1
+    # κ = τ_η/τ_ε = 0.5  →  K ≈ 0.83  (intermediate gain to make the (2.29) typo bite hardest)
+    tau_eps, tau_eta = 1.0, 0.5
     sig_ss_muth = riccati_muth(tau_eps, tau_eta)
     x_true, y, res_c, res_a = run_example(
         "Example 2.1 (Muth: random walk + noise)",
@@ -234,7 +223,8 @@ def main():
     mu = 0.0
     a = 1 - lam
     b_const = lam * mu
-    tau_eps, tau_eta = 0.1, 2.0
+    # κ = 0.5 here too; previously κ=20 made K≈0.012 and the two filters indistinguishable
+    tau_eps, tau_eta = 1.0, 0.5
     sig_ss_ar1 = riccati_ar1(a, tau_eps, tau_eta)
     x_true, y, res_c, res_a = run_example(
         "Example 2.2 (AR(1) + noise)",
