@@ -166,7 +166,7 @@ def plot_example(name, x_true, y, res_c, res_a, fname):
     axes[0].plot(x_true, "k-", lw=0.6, label="true x_t")
     axes[0].plot(res_c["x_post"], "b-", lw=0.5, label="(2.29) with t|t-1")
     axes[0].plot(res_a["x_post"], "r--", lw=0.5, label="(2.29) as printed with t|t")
-    axes[0].plot(y, "k.", ms=1, alpha=0.2, label="y_t")
+    axes[0].plot(y, "k.", ms=1, alpha=0.9, label="y_t")
     axes[0].legend(loc="best", fontsize=8)
     axes[0].set_title(f"{name}: filtered state")
 
@@ -178,15 +178,26 @@ def plot_example(name, x_true, y, res_c, res_a, fname):
     axes[1].set_ylabel(r"innovation  $y_{t} - \hat{x}_{t+1|t}$")
     axes[1].legend(fontsize=8)
 
-    tau_eta2 = res_c["_tau_eta2"]
-    Sc = res_c["S_pred"] + tau_eta2
-    Sa = res_a["S_pred"] + tau_eta2
-    ll_c = -0.5 * (np.log(2 * np.pi * Sc) + innov_c ** 2 / Sc)
-    ll_a = -0.5 * (np.log(2 * np.pi * Sa) + innov_a ** 2 / Sa)
-    axes[2].plot(np.cumsum(ll_c - ll_a), "g-")
-    axes[2].axhline(0, color="k", lw=0.5)
-    axes[2].set_ylabel("cum loglik:  t|t-1  −  as printed t|t")
+    # Expanding-mean squared innovation. Predictive variance S_innov = Σ_{t|t-1} + Σ_η
+    # is what E[(y_t − x̂_{t|t-1})²] should equal for a well-specified filter.
+    se_c = innov_c ** 2
+    se_a = innov_a ** 2
+    t_idx = np.arange(1, len(se_c) + 1)
+    exp_c = np.cumsum(se_c) / t_idx
+    exp_a = np.cumsum(se_a) / t_idx
+    S_innov = res_c["S_pred"][-1] + res_c["_tau_eta2"]   # steady-state predictive variance
+    axes[2].plot(exp_c, "b-", lw=0.8, label="(2.29) with t|t-1")
+    axes[2].plot(exp_a, "r--", lw=0.8, label="(2.29) as printed with t|t")
+    axes[2].axhline(S_innov, color="k", lw=0.8, ls=":", label=f"model predictive var = {S_innov:.3f}")
+    axes[2].set_ylabel(r"expanding MSE  $\frac{1}{t}\sum_{s\leq t}(y_s - \hat{x}_{s|s-1})^2$")
     axes[2].set_xlabel("t")
+    axes[2].legend(fontsize=8)
+    # Autoscale y to post-warmup region so burn-in noise doesn't squash the rest.
+    warmup = 200
+    tail_vals = np.concatenate([exp_c[warmup:], exp_a[warmup:], [S_innov]])
+    lo, hi = tail_vals.min(), tail_vals.max()
+    pad = 0.1 * (hi - lo) if hi > lo else 0.05 * hi
+    axes[2].set_ylim(lo - pad, hi + pad)
 
     plt.tight_layout()
     plt.savefig(fname, dpi=120)
@@ -196,26 +207,37 @@ def plot_example(name, x_true, y, res_c, res_a, fname):
 
 def main():
     # ---- Example 2.1: Muth / random walk + noise ----
-    tau_eps, tau_eta = 1, 5
-    sig_ss_muth = riccati_muth(tau_eps, tau_eta)
+    # set kalman gain to 1/2
+    # K = sigma_predict ** 2 / (sigma_predict ** 2 + latent_noise**2)
+    
+    kappa = np.sqrt(2) # latent_noise / observation_noise 
+    K = (1 + np.sqrt(4*kappa**2 + 1)) / (1 + np.sqrt(4*kappa**2+1) + 2*kappa**2)
+    
+
+    latent_noise = 1                       # τ_ε  (state-innovation scale)
+    obs_noise = kappa * latent_noise       # τ_η  (observation-noise scale)
+    sig_ss_muth = riccati_muth(latent_noise, obs_noise)   # riccati_muth(τ_ε, τ_η)
     x_true, y, res_c, res_a = run_example(
         "Example 2.1 (Muth: random walk + noise)",
         A=1.0, b_const=0.0, B=1.0,
-        tau_eps=tau_eps, tau_eta=tau_eta,
+        tau_eps=latent_noise, tau_eta=obs_noise,
         sig_init=sig_ss_muth, T=1000, seed=1,
         analytic_sig=sig_ss_muth,
     )
-    res_c["_tau_eta2"] = tau_eta ** 2
-    res_a["_tau_eta2"] = tau_eta ** 2
+    res_c["_tau_eta2"] = obs_noise ** 2
+    res_a["_tau_eta2"] = obs_noise ** 2
     plot_example("Example 2.1 (Muth)", x_true, y, res_c, res_a,
                  "/home/rakin/rnb76-rclone/datasci-mini-projects/eqi_kalman_filter_check/example_2_1.png")
 
     # ---- Example 2.2: AR(1) + noise ----
-    lam = 0.1
+    # Maximize per-step E[Δll] = A²·(1-K)²·L²/[2(1 - A²·(1-K)²·(1-L)²)]
+    # with L = K/(1+K) — peaks at K = √2 − 1 ≈ 0.414.
+    # For a=0.95, K=0.414  ⇔  τ_η²/τ_ε² ≈ 3, i.e. τ_η = √3.
+    lam = 0.05
     mu = 0.0
     a = 1 - lam
     b_const = lam * mu
-    tau_eps, tau_eta = 1, 5
+    tau_eps, tau_eta = 1.0, np.sqrt(3)
     sig_ss_ar1 = riccati_ar1(a, tau_eps, tau_eta)
     x_true, y, res_c, res_a = run_example(
         "Example 2.2 (AR(1) + noise)",
