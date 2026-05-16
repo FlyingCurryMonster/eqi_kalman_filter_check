@@ -114,48 +114,23 @@ def run_example(name, A, b_const, B, tau_eps, tau_eta, sig_init, T=1000, seed=0,
     K_a_ss = res_a["S_pred"][-1] * B / (B * res_a["S_pred"][-1] * B + tau_eta ** 2)
 
     print(f"\n=== {name} ===")
-    print(f"  T = {T},  τ_ε = {tau_eps},  τ_η = {tau_eta},  A = {A},  b = {b_const}")
+    print(f"  T = {T} timesteps,  τ_ε = {tau_eps},  τ_η = {tau_eta},  A = {A},  b = {b_const}")
     if analytic_sig is not None:
-        print(f"  analytic steady-state Σ_{{t+1|t}} (Riccati) = {analytic_sig:.6f}")
+        print(f"  analytic steady-state Σ_{{t+1|t}} = {analytic_sig:.6f}")
         print(f"    (2.29) with t|t-1            Σ_pred[T-1] = {res_c['S_pred'][-1]:.6f}")
         print(f"    (2.29) as printed with t|t   Σ_pred[T-1] = {res_a['S_pred'][-1]:.6f}")
-    print(f"  state RMSE   (2.29) t|t-1 = {rmse_c:.4f}    (2.29) as printed t|t = {rmse_a:.4f}")
-    print(f"  loglik       (2.29) t|t-1 = {res_c['loglik']:.2f}   (2.29) as printed t|t = {res_a['loglik']:.2f}")
-    print(f"  Δ loglik ( t|t-1  −  as printed t|t ) = {res_c['loglik'] - res_a['loglik']:.2f}")
     print(f"  steady-state K  (2.29) t|t-1 = {K_c_ss:.4f}   (2.29) as printed t|t = {K_a_ss:.4f}")
+    print(f"  state RMSE  (vs true x_t)            t|t-1 = {rmse_c:.4f}    as printed t|t = {rmse_a:.4f}")
 
-    # Per-step paired statistics — significance of the gap.
-    tau_eta2 = tau_eta ** 2
-    Sc_pred = res_c["S_pred"] + tau_eta2
-    Sa_pred = res_a["S_pred"] + tau_eta2
-    ll_c = -0.5 * (np.log(2 * np.pi * Sc_pred) + (y - res_c["x_pred"]) ** 2 / Sc_pred)
-    ll_a = -0.5 * (np.log(2 * np.pi * Sa_pred) + (y - res_a["x_pred"]) ** 2 / Sa_pred)
-    d_ll = ll_c - ll_a
-    # squared-error difference (corrected has lower SE if positive)
-    d_se = (res_a["x_post"] - x_true) ** 2 - (res_c["x_post"] - x_true) ** 2
-
-    def hac_se(d, L=None):
-        """Newey-West HAC standard error of sum_t d_t. L = bandwidth."""
-        T = len(d)
-        if L is None:
-            L = int(np.floor(4 * (T / 100) ** (2 / 9)))
-        m = d.mean()
-        u = d - m
-        gamma0 = (u * u).mean()
-        s = gamma0
-        for k in range(1, L + 1):
-            w = 1 - k / (L + 1)
-            gk = (u[k:] * u[:-k]).mean()
-            s += 2 * w * gk
-        # variance of sample mean ≈ s/T, so SE of sum = sqrt(T*s)
-        return np.sqrt(T * s), L
-
-    se_ll, L_ll = hac_se(d_ll)
-    se_se, L_se = hac_se(d_se)
-    sum_ll = d_ll.sum()
-    sum_se = d_se.sum()
-    print(f"  paired Δ loglik (t|t-1 − as printed t|t) = {sum_ll:+.2f}  HAC SE (L={L_ll}) = {se_ll:.2f}  →  {sum_ll/se_ll:+.1f}σ")
-    print(f"  paired Σ(SE_asprinted − SE_t|t-1)        = {sum_se:+.2f}  HAC SE (L={L_se}) = {se_se:.2f}  →  {sum_se/se_se:+.1f}σ")
+    # One-step prediction MSE on the observed data: mean of (y_t - x̂_{t|t-1})².
+    # For a correctly specified filter this converges to the model-implied
+    # predictive variance  Σ̂_{t|t-1} + Σ_η.
+    mse_c = np.mean((y - res_c["x_pred"]) ** 2)
+    mse_a = np.mean((y - res_a["x_pred"]) ** 2)
+    S_innov_model = res_c["S_pred"][-1] * B * B + tau_eta ** 2
+    print(f"  one-step pred MSE (vs y_t)           t|t-1 = {mse_c:.4f}    as printed t|t = {mse_a:.4f}")
+    print(f"     model-implied predictive variance  Σ̂_{{t|t-1}} + Σ_η = {S_innov_model:.4f}")
+    print(f"     MSE inflation (as printed − t|t-1) = {mse_a - mse_c:+.4f}  ({100*(mse_a-mse_c)/mse_c:+.2f}%)")
 
     return x_true, y, res_c, res_a
 
@@ -229,27 +204,28 @@ def main():
     plot_example("Example 2.1 (Muth)", x_true, y, res_c, res_a,
                  "/home/rakin/rnb76-rclone/datasci-mini-projects/eqi_kalman_filter_check/example_2_1.png")
 
+
     # ---- Example 2.2: AR(1) + noise ----
-    # Maximize per-step E[Δll] = A²·(1-K)²·L²/[2(1 - A²·(1-K)²·(1-L)²)]
-    # with L = K/(1+K) — peaks at K = √2 − 1 ≈ 0.414.
-    # For a=0.95, K=0.414  ⇔  τ_η²/τ_ε² ≈ 3, i.e. τ_η = √3.
+    # Book eqs. 2.37-2.38:  a = 1 − λ,  b = λμ.  λ ∈ (0,1] is the relaxation
+    # For a=0.95, K=0.414  ⇔  obs_noise²/latent_noise² ≈ 3.
     lam = 0.05
     mu = 0.0
     a = 1 - lam
     b_const = lam * mu
-    tau_eps, tau_eta = 1.0, np.sqrt(3)
-    sig_ss_ar1 = riccati_ar1(a, tau_eps, tau_eta)
+    latent_noise = 1.0                      # τ_ε  (state-innovation scale)
+    obs_noise = np.sqrt(3) * latent_noise   # τ_η  (observation-noise scale)
+    sig_ss_ar1 = riccati_ar1(a, latent_noise, obs_noise)   # riccati_ar1(a, τ_ε, τ_η)
     x_true, y, res_c, res_a = run_example(
         "Example 2.2 (AR(1) + noise)",
         A=a, b_const=b_const, B=1.0,
-        tau_eps=tau_eps, tau_eta=tau_eta,
-        sig_init=sig_ss_ar1, T=1000, seed=2,
+        tau_eps=latent_noise, tau_eta=obs_noise,
+        sig_init=sig_ss_ar1, T=1000, seed=343,
         analytic_sig=sig_ss_ar1,
     )
-    res_c["_tau_eta2"] = tau_eta ** 2
-    res_a["_tau_eta2"] = tau_eta ** 2
+    res_c["_tau_eta2"] = obs_noise ** 2
+    res_a["_tau_eta2"] = obs_noise ** 2
     plot_example("Example 2.2 (AR(1))", x_true, y, res_c, res_a,
-                 "/home/rakin/rnb76-rclone/datasci-mini-projects/eqi_kalman_filter_check/example_2_2.png")
+                 "./example_2_2.png")
 
 
 if __name__ == "__main__":
