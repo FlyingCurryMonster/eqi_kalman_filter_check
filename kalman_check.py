@@ -202,7 +202,7 @@ def main():
     res_c["_tau_eta2"] = obs_noise ** 2
     res_a["_tau_eta2"] = obs_noise ** 2
     plot_example("Example 2.1 (Muth)", x_true, y, res_c, res_a,
-                 "/home/rakin/rnb76-rclone/datasci-mini-projects/eqi_kalman_filter_check/example_2_1.png")
+                 "./example_2_1.png")
 
 
     # ---- Example 2.2: AR(1) + noise ----
